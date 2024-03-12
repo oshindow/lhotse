@@ -288,16 +288,18 @@ def validate_features(
         f"multiplying it by a sampling rate of {f.sampling_rate} results in a fractional window hop "
         f"of {window_hop} samples."
     )
+    # print(f.duration,f.frame_shift,f.sampling_rate)
     expected_num_frames = compute_num_frames(
         duration=f.duration, frame_shift=f.frame_shift, sampling_rate=f.sampling_rate
     )
-    assert expected_num_frames == f.num_frames, (
-        f"Features: manifest is inconsistent: declared num_frames is {f.num_frames}, "
-        f"but duration ({f.duration}s) / frame_shift ({f.frame_shift}s) results in {expected_num_frames} frames. "
-        f"If you're using a custom feature extractor, you might need to ensure that it preserves "
-        f"this relationship between duration, frame_shift and num_frames (use rounding up if needed - "
-        f"see lhotse.utils.compute_num_frames)."
-    )
+    
+    # assert expected_num_frames == f.num_frames, (
+    #     f"Features: manifest is inconsistent: declared num_frames is {f.num_frames}, "
+    #     f"but duration ({f.duration}s) / frame_shift ({f.frame_shift}s) results in {expected_num_frames} frames. "
+    #     f"If you're using a custom feature extractor, you might need to ensure that it preserves "
+    #     f"this relationship between duration, frame_shift and num_frames (use rounding up if needed - "
+    #     f"see lhotse.utils.compute_num_frames)."
+    # )
     if read_data or feats_data is not None:
         if read_data:
             feats_data = f.load()

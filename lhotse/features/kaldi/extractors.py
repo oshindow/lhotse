@@ -11,6 +11,7 @@ from lhotse.features.kaldi.layers import (
     Wav2LogSpec,
     Wav2MFCC,
     Wav2Spec,
+    Wav2F0,
 )
 from lhotse.utils import (
     EPSILON,
@@ -60,8 +61,8 @@ class FbankConfig:
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "FbankConfig":
         return FbankConfig(**data)
-
-
+    
+    
 @register_extractor
 class Fbank(FeatureExtractor):
     name = "kaldi-fbank"
@@ -538,3 +539,107 @@ def _extract_batch(
             return np.stack(result, axis=0)
     else:
         return result
+
+
+@dataclass
+class F0Config:
+    sampling_rate: int = 16000
+    frame_period: int = 10
+    f0_ceil: int = 1400
+    f0_floor: int = 60
+    device: str = "cpu"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict_nonull(self)
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "F0Config":
+        return F0Config(**data)
+
+
+@register_extractor
+class F0(FeatureExtractor):
+    name = "pyword-dio-f0"
+    config_type = F0Config
+
+    def __init__(self, config: Optional[F0Config] = None):
+        super().__init__(config=config)
+        config_dict = self.config.to_dict()
+        config_dict.pop("device")
+        self.extractor = Wav2F0(**config_dict).to(self.device).eval()
+
+    @property
+    def device(self) -> Union[str, torch.device]:
+        return self.config.device
+
+    @property
+    def frame_shift(self) -> int:
+        return self.config.frame_period / 1000
+
+    def to(self, device: str):
+        self.config.device = device
+        self.extractor.to(device)
+
+    def feature_dim(self, sampling_rate: int) -> int:
+        return self.config.frame_period
+
+    def extract(
+        self, samples: Union[np.ndarray, torch.Tensor], sampling_rate: int
+    ) -> Union[np.ndarray, torch.Tensor]:
+        assert sampling_rate == self.config.sampling_rate, (
+            f"Fbank was instantiated for sampling_rate "
+            f"{self.config.sampling_rate}, but "
+            f"sampling_rate={sampling_rate} was passed to extract(). "
+            "Note you can use CutSet/RecordingSet.resample() to change the audio sampling rate."
+        )
+
+        # is_numpy = False
+        # print(type(samples))
+        # if not isinstance(samples, np.ndarray):
+        samples = samples[0].astype(np.float64)
+        is_numpy = False
+
+        feats = self.extractor(samples)
+        # print(feats)
+        # print(feats.ndim)
+        feats = torch.tensor(feats)[:-1].unsqueeze(-1)
+        
+        # print(feats.shape)
+
+        if is_numpy:
+            return feats.cpu().numpy()
+        else:
+            return feats
+
+    def extract_batch(
+        self,
+        samples: Union[
+            np.ndarray, torch.Tensor, Sequence[np.ndarray], Sequence[torch.Tensor]
+        ],
+        sampling_rate: int,
+        lengths: Optional[Union[np.ndarray, torch.Tensor]] = None,
+    ) -> Union[np.ndarray, torch.Tensor, List[np.ndarray], List[torch.Tensor]]:
+        return _extract_batch(
+            self.extractor,
+            samples,
+            sampling_rate,
+            frame_shift=self.frame_shift,
+            lengths=lengths,
+            device=self.device,
+        )
+
+    @staticmethod
+    def mix(
+        features_a: np.ndarray, features_b: np.ndarray, energy_scaling_factor_b: float
+    ) -> np.ndarray:
+        return np.log(
+            np.maximum(
+                # protection against log(0); max with EPSILON is adequate since these are energies (always >= 0)
+                EPSILON,
+                np.exp(features_a) + energy_scaling_factor_b * np.exp(features_b),
+            )
+        )
+
+    @staticmethod
+    def compute_energy(features: np.ndarray) -> float:
+        return float(np.sum(np.exp(features)))

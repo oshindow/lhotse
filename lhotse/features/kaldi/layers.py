@@ -28,6 +28,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 from torch import nn
+import pyworld as pw
 
 try:
     from torch.fft import rfft as torch_rfft
@@ -585,6 +586,47 @@ class Wav2LogFilterBank(Wav2FFT):
 
         return pow_spec
 
+class Wav2F0(nn.Module):
+    """
+    Apply standard Kaldi preprocessing (dithering, removing DC offset, pre-emphasis, etc.)
+    on the input waveforms and compute their log-Mel filter bank energies (also known as "fbank").
+
+    Example::
+
+        >>> x = torch.randn(1, 16000, dtype=torch.float32)
+        >>> x.shape
+        torch.Size([1, 16000])
+        >>> t = Wav2LogFilterBank()
+        >>> t(x).shape
+        torch.Size([1, 100, 80])
+
+    The input is a tensor of shape ``(batch_size, num_samples)``.
+    The output is a tensor of shape ``(batch_size, num_frames, num_filters)``.
+    """
+
+    def __init__(
+        self,
+        sampling_rate: int = 16000,
+        frame_period: int = 10,
+        f0_ceil: int = 1400,
+        f0_floor: int = 60,
+    ):
+        super().__init__()
+
+        self.sampling_rate = sampling_rate
+        self.frame_period = frame_period
+        self.f0_ceil = f0_ceil
+        self.f0_floor = f0_floor
+
+    def forward(
+        self, x: np.ndarray
+    ) -> np.ndarray:
+        
+        f0, t = pw.dio(x, self.sampling_rate, f0_floor=self.f0_floor, f0_ceil=self.f0_ceil, frame_period=self.frame_period)
+        f0 = pw.stonemask(x, f0, t, self.sampling_rate)
+
+        return f0
+    
 
 class Wav2MFCC(Wav2FFT):
     """
@@ -971,3 +1013,4 @@ def next_power_of_2(x: int) -> int:
     Original source: TorchAudio (torchaudio/compliance/kaldi.py)
     """
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
+

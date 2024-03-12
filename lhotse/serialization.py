@@ -459,6 +459,7 @@ def load_manifest_lazy(path: Pathlike) -> Optional[Manifest]:
     Generic utility for reading an arbitrary manifest from a JSONL file.
     Returns None when the manifest is empty.
     """
+    print('use local lhotse')
     assert extension_contains(".jsonl", path) or str(path) == "-"
     raw_data = iter(load_jsonl(path))
     try:

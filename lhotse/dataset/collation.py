@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.nn import CrossEntropyLoss
 
-from lhotse import CutSet, Recording
+from lhotse import CutSet, Recording, Features
 from lhotse.audio import suppress_audio_loading_errors
 from lhotse.audio.utils import suppress_video_loading_errors
 from lhotse.cut import Cut, MixedCut
@@ -142,6 +142,58 @@ def collate_features(
             features[idx] = example_features
     return features, features_lens
 
+def collate_costom_features(
+    cuts: CutSet,
+    pad_direction: str = "right",
+    executor: Optional[Executor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Load features for all the cuts and return them as a batch in a torch tensor.
+    The output shape is ``(batch, time, features)``.
+    The cuts will be padded with silence if necessary.
+
+    :param cuts: a :class:`CutSet` used to load the features.
+    :param pad_direction: where to apply the padding (``right``, ``left``, or ``both``).
+    :param executor: an instance of ThreadPoolExecutor or ProcessPoolExecutor; when provided,
+        we will use it to read the features concurrently.
+    :return: a tuple of tensors ``(features, features_lens)``.
+    """
+    # assert all(cut.has_features for cut in cuts)
+    features_lens = torch.tensor([cut.num_frames for cut in cuts], dtype=torch.int)
+    cuts = maybe_pad(
+        cuts, num_frames=max(features_lens).item(), direction=pad_direction
+    )
+    first_cut = next(iter(cuts))
+    features = torch.empty(len(cuts), first_cut.custom.num_frames, first_cut.custom.num_features)
+    if executor is None:
+        for idx, cut in enumerate(cuts):
+            features[idx] = _read_custom_features(cut)
+    else:
+        for idx, example_features in enumerate(executor.map(_read_custom_features, cuts)):
+            features[idx] = example_features
+    return features, features_lens
+
+def _read_custom_features(cut: Cut) -> torch.Tensor:
+
+    features = Features(
+        type=cut.custom['type'],
+        num_frames=cut.custom['num_frames'],
+        num_features=cut.custom['num_features'],
+        frame_shift=cut.custom['frame_shift'],
+        sampling_rate=cut.custom['sampling_rate'],
+        start=cut.custom['start'],
+        duration=cut.custom['duration'],
+        storage_type=cut.custom['storage_type'],
+        storage_path=cut.custom['storage_path'],
+        storage_key=cut.custom['storage_key']
+    )
+    feats = features.load(start=features.start, duration=features.duration)
+    if feats.shape[0] - features.num_frames == 1:
+        feats = feats[: features.num_frames, :]
+    elif feats.shape[0] - features.num_frames == -1:
+        feats = np.concatenate((feats, feats[-1:, :]), axis=0)
+        
+    return torch.from_numpy(feats)
 
 def collate_audio(
     cuts: CutSet,

@@ -11,7 +11,8 @@ def lilcom_compress_chunked(
     chunk_size: int = 100,
     temporal_dim: int = 0,
 ) -> List[bytes]:
-    assert temporal_dim < data.ndim
+    # print((temporal_dim, data.ndim))
+    assert temporal_dim < data.ndim 
     num_frames = data.shape[temporal_dim]
     compressed = []
     for begin in range(0, num_frames, chunk_size):

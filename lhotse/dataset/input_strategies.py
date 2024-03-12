@@ -10,6 +10,7 @@ from lhotse.cut import compute_supervisions_frame_mask
 from lhotse.dataset.collation import (
     collate_audio,
     collate_features,
+    collate_costom_features,
     collate_matrices,
     collate_vectors,
     read_audio_from_cuts,
@@ -97,7 +98,81 @@ class BatchIO:
         """
         raise NotImplementedError()
 
+# collate_custom_field
+class PrecomputedcostomFeatures(BatchIO):
+    """
+    :class:`InputStrategy` that reads pre-computed features, whose manifests
+    are attached to cuts, from disk.
 
+    It automatically pads the feature matrices so that every example has the same number
+    of frames as the longest cut in a mini-batch.
+    This is needed to put all examples into a single tensor.
+    The padding value is a low log-energy, around log(1e-10).
+
+    .. automethod:: __call__
+    """
+
+    def __call__(self, cuts: CutSet) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Reads the pre-computed features from disk/other storage.
+        The returned shape is ``(B, T, F) => (batch_size, num_frames, num_features)``.
+
+        :return: a tensor with collated features, and a tensor of ``num_frames`` of each cut before padding."""
+        return collate_costom_features(
+            cuts,
+            executor=_get_executor(self.num_workers, executor_type=self._executor_type),
+        )
+
+    def supervision_intervals(self, cuts: CutSet) -> Dict[str, torch.Tensor]:
+        """
+        Returns a dict that specifies the start and end bounds for each supervision,
+        as a 1-D int tensor, in terms of frames:
+
+        .. code-block:
+
+            {
+                "sequence_idx": tensor(shape=(S,)),
+                "start_frame": tensor(shape=(S,)),
+                "num_frames": tensor(shape=(S,))
+            }
+
+        Where ``S`` is the total number of supervisions encountered in the :class:`CutSet`.
+        Note that ``S`` might be different than the number of cuts (``B``).
+        ``sequence_idx`` means the index of the corresponding feature matrix (or cut) in a batch.
+        """
+        start_frames, nums_frames = zip(
+            *(
+                supervision_to_frames(
+                    sup, cut.frame_shift, cut.sampling_rate, max_frames=cut.num_frames
+                )
+                for cut in cuts
+                for sup in cut.supervisions
+            )
+        )
+        sequence_idx = [i for i, c in enumerate(cuts) for s in c.supervisions]
+        return {
+            "sequence_idx": torch.tensor(sequence_idx, dtype=torch.int32),
+            "start_frame": torch.tensor(start_frames, dtype=torch.int32),
+            "num_frames": torch.tensor(nums_frames, dtype=torch.int32),
+        }
+
+    def supervision_masks(
+        self, cuts: CutSet, use_alignment_if_exists: Optional[str] = None
+    ) -> torch.Tensor:
+        """Returns the mask for supervised frames.
+
+        :param use_alignment_if_exists: optional str, key for alignment type to use for generating the mask. If not
+            exists, fall back on supervision time spans.
+        """
+        return collate_vectors(
+            [
+                cut.supervisions_feature_mask(
+                    use_alignment_if_exists=use_alignment_if_exists
+                )
+                for cut in cuts
+            ]
+        )
+    
 class PrecomputedFeatures(BatchIO):
     """
     :class:`InputStrategy` that reads pre-computed features, whose manifests

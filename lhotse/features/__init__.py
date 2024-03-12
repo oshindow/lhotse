@@ -36,6 +36,10 @@ from .kaldi.extractors import (
     MfccConfig,
     Spectrogram,
     SpectrogramConfig,
+    F0,
+    F0Config,
+    # F0WhisperFbank,
+    # F0WhisperFbankConfig
 )
 from .kaldifeat import (
     KaldifeatFbank,
